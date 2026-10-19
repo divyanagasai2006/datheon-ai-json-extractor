@@ -5,9 +5,10 @@ from typing import Optional
 
 from dotenv import load_dotenv
 from google import genai
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError, Field
 
-# Load API key from .env
+
+# 1. Load API key securely from .env
 load_dotenv()
 
 api_key = os.getenv("GEMINI_API_KEY")
@@ -20,45 +21,70 @@ if not api_key:
 client = genai.Client(api_key=api_key)
 
 
-# Define the expected JSON structure
+# 2. Define the expected JSON structure
 class ResumeAnalysis(BaseModel):
-    name: str
-    email: Optional[str] = None
-    skills: list[str]
-    experience: Optional[str] = None
+    name: str = Field(description="Full name of the person")
+    email: Optional[str] = Field(
+        default=None,
+        description="Email address, if available"
+    )
+    skills: list[str] = Field(
+        description="Skills explicitly mentioned in the resume"
+    )
+    experience: Optional[str] = Field(
+        default=None,
+        description="Experience or projects, if available"
+    )
 
 
-# Reusable parameterized prompt template
+# 3. Reusable parameterized prompt template
 def create_resume_prompt(resume_text: str) -> str:
     return f"""
 You are a resume information extraction assistant.
 
-Extract information from the resume text below.
+Extract information only from the resume text provided below.
 
 Rules:
-- Extract only information present in the resume.
-- Do not invent details.
-- Return null for missing optional fields.
-- Return the requested JSON structure.
+- Extract only details explicitly present in the text.
+- Never invent names, emails, skills, or experience.
+- Use an empty list if no skills are mentioned.
+- Use null for missing optional fields.
+- If the name is missing, use "Not provided".
+- Return only data matching the requested JSON schema.
 
 Resume text:
 {resume_text}
 """
 
 
-# Sample resume text for testing
-resume_text = """
-Name: Divya
-Email: divya@example.com
-Skills: Python, Excel, Linux
-Experience: Beginner Python project
-"""
+# 4. Get resume text from the user
+def get_resume_text() -> str:
+    print("\n=== Resume Information Extractor ===")
+    print("Paste your resume text below.")
+    print("When finished, type END on a new line.\n")
 
-# Create the prompt using the resume text
-prompt = create_resume_prompt(resume_text)
+    lines = []
 
-try:
-    # Ask Gemini to extract the information as JSON
+    while True:
+        line = input()
+
+        if line.strip().upper() == "END":
+            break
+
+        lines.append(line)
+
+    resume_text = "\n".join(lines).strip()
+
+    if not resume_text:
+        raise ValueError("Resume text cannot be empty.")
+
+    return resume_text
+
+
+# 5. Extract and validate resume information
+def analyze_resume(resume_text: str) -> ResumeAnalysis:
+    prompt = create_resume_prompt(resume_text)
+
     response = client.models.generate_content(
         model="gemini-3.5-flash",
         contents=prompt,
@@ -68,17 +94,61 @@ try:
         },
     )
 
-    # Validate the returned JSON with Pydantic
+    if not response.text:
+        raise ValueError("Gemini returned an empty response.")
+
+    # Validate the generated JSON using Pydantic
     result = ResumeAnalysis.model_validate_json(response.text)
 
-    # Print formatted JSON output
-    print("Resume extracted and validated successfully!")
-    print(json.dumps(result.model_dump(), indent=4))
+    return result
 
-except ValidationError as error:
-    print("The extracted data did not pass validation.")
-    print(error)
 
-except Exception as error:
-    print("Something went wrong while calling Gemini.")
-    print(f"{type(error).__name__}: {error}")
+# 6. Main program
+def main():
+    try:
+        resume_text = get_resume_text()
+
+        print("\nAnalyzing resume... Please wait.\n")
+
+        result = analyze_resume(resume_text)
+
+        print("Resume extracted and validated successfully!")
+        print("\nStructured JSON Output:\n")
+
+        print(
+            json.dumps(
+                result.model_dump(),
+                indent=4,
+                ensure_ascii=False
+            )
+        )
+
+        # Save the extracted result to a JSON file
+        with open(
+            "resume_output.json",
+            "w",
+            encoding="utf-8"
+        ) as file:
+            json.dump(
+                result.model_dump(),
+                file,
+                indent=4,
+                ensure_ascii=False
+            )
+
+        print("\nOutput saved to resume_output.json")
+
+    except ValueError as error:
+        print(f"Input or configuration error: {error}")
+
+    except ValidationError as error:
+        print("The extracted data did not pass validation.")
+        print(error)
+
+    except Exception as error:
+        print("Something went wrong.")
+        print(f"{type(error).__name__}: {error}")
+
+
+if __name__ == "__main__":
+    main()
