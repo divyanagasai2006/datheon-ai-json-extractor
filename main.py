@@ -39,23 +39,46 @@ class ResumeAnalysis(BaseModel):
 
 # 3. Reusable parameterized prompt template
 def create_resume_prompt(resume_text: str) -> str:
-    return f"""
+        return f"""
 You are a resume information extraction assistant.
 
-Extract information only from the resume text provided below.
+Extract only information present in the resume.
+Never invent details.
+Use an empty list if no skills are mentioned.
+Use null for missing optional fields.
+If the name is missing, use "Not provided".
 
-Rules:
-- Extract only details explicitly present in the text.
-- Never invent names, emails, skills, or experience.
-- Use an empty list if no skills are mentioned.
-- Use null for missing optional fields.
-- If the name is missing, use "Not provided".
-- Return only data matching the requested JSON schema.
+Example 1:
+Resume:
+Name: Ravi Kumar
+Email: ravi@example.com
+Skills: Python, SQL
+Experience: Data analysis internship
 
-Resume text:
+Expected JSON:
+{{
+    "name": "Ravi Kumar",
+    "email": "ravi@example.com",
+    "skills": ["Python", "SQL"],
+    "experience": "Data analysis internship"
+}}
+
+Example 2:
+Resume:
+Name: Anu
+Skills: Java
+
+Expected JSON:
+{{
+    "name": "Anu",
+    "email": null,
+    "skills": ["Java"],
+    "experience": null
+}}
+
+Now extract information from this resume:
 {resume_text}
 """
-
 
 # 4. Get resume text from the user
 def get_resume_text() -> str:
@@ -86,7 +109,7 @@ def analyze_resume(resume_text: str) -> ResumeAnalysis:
     prompt = create_resume_prompt(resume_text)
 
     response = client.models.generate_content(
-        model="gemini-3.5-flash",
+        model="gemini-3.5-flash-lite",
         contents=prompt,
         config={
             "response_mime_type": "application/json",
